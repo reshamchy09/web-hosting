@@ -40,10 +40,11 @@ def deploy_django_project(username, project_name, uploaded_file_path, custom_dom
             shutil.rmtree(project_folder, ignore_errors=True)
         os.makedirs(project_folder, exist_ok=True)
 
-        # Extract uploaded Django project
+        # Extract uploaded Django project with memory-efficient approach
         logger.info(f"Extracting project from {uploaded_file_path}")
-        with zipfile.ZipFile(uploaded_file_path, 'r') as zip_ref:
-            zip_ref.extractall(project_folder)
+        success = extract_zip_safely(uploaded_file_path, project_folder)
+        if not success:
+            return {'success': False, 'error': 'Failed to extract ZIP file - file may be corrupted or too large'}
 
         # Detect Django project structure
         django_info = detect_django_structure(project_folder)
@@ -896,3 +897,66 @@ def check_deployment_status(username, title, domain_name):
 
 def cleanup_deployment(username, title):
     pass
+
+
+def extract_zip_safely(zip_path, extract_to):
+    """
+    Extract ZIP file with memory-efficient approach to prevent OOM errors
+    """
+    try:
+        # Check file size first
+        file_size = os.path.getsize(zip_path)
+        max_size = 100 * 1024 * 1024  # 100MB limit
+        
+        if file_size > max_size:
+            logger.error(f"ZIP file too large: {file_size} bytes")
+            return False
+        
+        logger.info(f"Extracting ZIP file of size: {file_size} bytes")
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # Get list of files to check total uncompressed size
+            total_size = 0
+            file_count = 0
+            
+            for info in zip_ref.infolist():
+                total_size += info.file_size
+                file_count += 1
+                
+                # Limit checks to prevent zip bombs
+                if total_size > 500 * 1024 * 1024:  # 500MB uncompressed limit
+                    logger.error("ZIP file expands to more than 500MB")
+                    return False
+                    
+                if file_count > 10000:  # Max 10k files
+                    logger.error("ZIP file contains too many files")
+                    return False
+            
+            logger.info(f"ZIP contains {file_count} files, {total_size} bytes uncompressed")
+            
+            # Extract files one by one to control memory usage
+            for member in zip_ref.infolist():
+                # Skip dangerous paths
+                if member.filename.startswith('/') or '..' in member.filename:
+                    logger.warning(f"Skipping dangerous path: {member.filename}")
+                    continue
+                
+                # Extract individual file
+                try:
+                    zip_ref.extract(member, extract_to)
+                except Exception as e:
+                    logger.warning(f"Failed to extract {member.filename}: {str(e)}")
+                    continue
+            
+        logger.info("ZIP extraction completed successfully")
+        return True
+        
+    except zipfile.BadZipFile:
+        logger.error("Invalid or corrupted ZIP file")
+        return False
+    except MemoryError:
+        logger.error("Out of memory during ZIP extraction")
+        return False
+    except Exception as e:
+        logger.error(f"ZIP extraction error: {str(e)}")
+        return False
