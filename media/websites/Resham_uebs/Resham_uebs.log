@@ -1,0 +1,12 @@
+System check identified some issues:
+
+WARNINGS:
+?: (staticfiles.W004) The directory 'E:\Local Projects\Django web host\media\websites\Resham_uebs\UEBS School\static' in the STATICFILES_DIRS setting does not exist.
+
+System check identified 1 issue (0 silenced).
+[15/Sep/2025 18:34:44] "GET / HTTP/1.1" 200 25564
+[15/Sep/2025 18:34:44] "GET /static/css/style.css HTTP/1.1" 200 18781
+[15/Sep/2025 18:34:44] "GET /static/image/hero2.jpg HTTP/1.1" 200 477369
+[15/Sep/2025 18:34:44] "GET /static/image/hero1.jpg HTTP/1.1" 200 498832
+[15/Sep/2025 18:34:45] "GET /static/image/hero3.jpg HTTP/1.1" 200 1858589
+[15/Sep/2025 18:34:45] "GET /static/js/main.js HTTP/1.1" 200 21425

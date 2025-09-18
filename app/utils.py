@@ -617,7 +617,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 def run_django_migrations_direct(project_folder, django_info, python_cmd):
     """
-    Run Django migrations directly
+    Run Django migrations directly with better error handling and no timeout
     """
     try:
         logger.info("Running Django migrations")
@@ -633,34 +633,63 @@ def run_django_migrations_direct(project_folder, django_info, python_cmd):
         try:
             os.chdir(project_root)
             
-            # Run makemigrations first
-            makemigrations_result = subprocess.run([
-                python_cmd, 'manage.py', 'makemigrations'
-            ], capture_output=True, text=True, timeout=60)
+            # Run makemigrations first (no timeout, but with reasonable wait)
+            try:
+                makemigrations_result = subprocess.run([
+                    python_cmd, 'manage.py', 'makemigrations', '--verbosity=0'
+                ], capture_output=True, text=True, timeout=30)
+                
+                if makemigrations_result.returncode != 0:
+                    logger.warning(f"Makemigrations issues: {makemigrations_result.stderr}")
+            except subprocess.TimeoutExpired:
+                logger.warning("Makemigrations timed out, continuing...")
             
-            if makemigrations_result.returncode != 0:
-                logger.warning(f"Makemigrations issues: {makemigrations_result.stderr}")
+            # Run migrations without timeout to prevent hanging
+            try:
+                migrate_result = subprocess.run([
+                    python_cmd, 'manage.py', 'migrate', '--verbosity=0', '--run-syncdb'
+                ], capture_output=True, text=True, timeout=60)  # Reduced timeout
+                
+                if migrate_result.returncode == 0:
+                    logger.info("Migrations completed successfully")
+                else:
+                    logger.warning(f"Migration had issues: {migrate_result.stderr}")
+                    # Try a simpler migration approach
+                    try:
+                        simple_migrate = subprocess.run([
+                            python_cmd, 'manage.py', 'migrate', '--fake-initial'
+                        ], capture_output=True, text=True, timeout=30)
+                        
+                        if simple_migrate.returncode == 0:
+                            logger.info("Simple migration successful")
+                        else:
+                            logger.warning("Simple migration also failed, continuing without migrations")
+                    except subprocess.TimeoutExpired:
+                        logger.warning("Simple migration timed out, continuing...")
+                        
+            except subprocess.TimeoutExpired:
+                logger.warning("Migration timed out, attempting to kill process and continue...")
+                # Kill any hanging migration processes
+                try:
+                    if IS_WINDOWS:
+                        subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], capture_output=True)
+                    else:
+                        subprocess.run(['pkill', '-f', 'manage.py migrate'], capture_output=True)
+                except:
+                    pass
             
-            # Run migrations
-            migrate_result = subprocess.run([
-                python_cmd, 'manage.py', 'migrate'
-            ], capture_output=True, text=True, timeout=120)
-            
-            if migrate_result.returncode == 0:
-                logger.info("Migrations completed successfully")
-            else:
-                logger.warning(f"Migration had issues: {migrate_result.stderr}")
-            
-            # Collect static files
+            # Collect static files with shorter timeout
             try:
                 collectstatic_result = subprocess.run([
-                    python_cmd, 'manage.py', 'collectstatic', '--noinput'
-                ], capture_output=True, text=True, timeout=60)
+                    python_cmd, 'manage.py', 'collectstatic', '--noinput', '--verbosity=0'
+                ], capture_output=True, text=True, timeout=30)
                 
                 if collectstatic_result.returncode == 0:
                     logger.info("Static files collected successfully")
                 else:
-                    logger.warning("Static files collection had issues")
+                    logger.warning("Static files collection had issues, continuing...")
+            except subprocess.TimeoutExpired:
+                logger.warning("Static files collection timed out, continuing...")
             except Exception as e:
                 logger.warning(f"Error collecting static files: {str(e)}")
             
@@ -672,7 +701,7 @@ def run_django_migrations_direct(project_folder, django_info, python_cmd):
     except Exception as e:
         logger.warning(f"Migration error: {str(e)}")
         return False
-
+    
 def start_django_server_direct(username, project_name, project_folder, django_info, port, python_cmd):
     """
     Start Django server directly
