@@ -253,6 +253,41 @@ def install_from_import_analysis(project_folder, python_cmd):
             'reportlab': 'reportlab',
         }
         
+        # Python standard library modules (DO NOT try to install these)
+        stdlib_modules = {
+            # Built-in modules
+            'abc', 'aifc', 'argparse', 'array', 'ast', 'asynchat', 'asyncio', 'asyncore',
+            'atexit', 'audioop', 'base64', 'bdb', 'binascii', 'binhex', 'bisect', 'builtins',
+            'bz2', 'calendar', 'cgi', 'cgitb', 'chunk', 'cmath', 'cmd', 'code', 'codecs',
+            'codeop', 'collections', 'colorsys', 'compileall', 'concurrent', 'configparser',
+            'contextlib', 'contextvars', 'copy', 'copyreg', 'crypt', 'csv', 'ctypes',
+            'curses', 'dataclasses', 'datetime', 'dbm', 'decimal', 'difflib', 'dis',
+            'distutils', 'doctest', 'email', 'encodings', 'enum', 'errno', 'faulthandler',
+            'fcntl', 'filecmp', 'fileinput', 'fnmatch', 'formatter', 'fractions', 'ftplib',
+            'functools', 'gc', 'getopt', 'getpass', 'gettext', 'glob', 'graphlib', 'grp',
+            'gzip', 'hashlib', 'heapq', 'hmac', 'html', 'http', 'imaplib', 'imghdr', 'imp',
+            'importlib', 'inspect', 'io', 'ipaddress', 'itertools', 'json', 'keyword',
+            'lib2to3', 'linecache', 'locale', 'logging', 'lzma', 'mailbox', 'mailcap',
+            'marshal', 'math', 'mimetypes', 'mmap', 'modulefinder', 'msilib', 'msvcrt',
+            'multiprocessing', 'netrc', 'nis', 'nntplib', 'numbers', 'operator', 'optparse',
+            'os', 'ossaudiodev', 'parser', 'pathlib', 'pdb', 'pickle', 'pickletools', 'pipes',
+            'pkgutil', 'platform', 'plistlib', 'poplib', 'posix', 'posixpath', 'pprint',
+            'profile', 'pstats', 'pty', 'pwd', 'py_compile', 'pyclbr', 'pydoc', 'queue',
+            'quopri', 'random', 're', 'readline', 'reprlib', 'resource', 'rlcompleter',
+            'runpy', 'sched', 'secrets', 'select', 'selectors', 'shelve', 'shlex', 'shutil',
+            'signal', 'site', 'smtpd', 'smtplib', 'sndhdr', 'socket', 'socketserver',
+            'spwd', 'sqlite3', 'ssl', 'stat', 'statistics', 'string', 'stringprep', 'struct',
+            'subprocess', 'sunau', 'symbol', 'symtable', 'sys', 'sysconfig', 'syslog',
+            'tabnanny', 'tarfile', 'telnetlib', 'tempfile', 'termios', 'test', 'textwrap',
+            'threading', 'time', 'timeit', 'tkinter', 'token', 'tokenize', 'trace',
+            'traceback', 'tracemalloc', 'tty', 'turtle', 'turtledemo', 'types', 'typing',
+            'unicodedata', 'unittest', 'urllib', 'uu', 'uuid', 'venv', 'warnings', 'wave',
+            'weakref', 'webbrowser', 'winreg', 'winsound', 'wsgiref', 'xdrlib', 'xml',
+            'xmlrpc', 'zipapp', 'zipfile', 'zipimport', 'zlib',
+            # Django modules (already installed)
+            'django',
+        }
+        
         # Find all Python files and extract imports
         imports = set()
         for root, dirs, files in os.walk(project_folder):
@@ -274,14 +309,28 @@ def install_from_import_analysis(project_folder, python_cmd):
         # Filter and install packages
         packages_to_install = []
         for imp in imports:
-            if imp in package_mappings:
-                packages_to_install.append(package_mappings[imp])
-            elif imp not in ['django', 'os', 'sys', 'json', 'time', 'datetime', 'collections', 're', 'math', 'random']:
-                # Try to install the package directly
+            imp_lower = imp.lower()
+            
+            # Skip standard library modules
+            if imp_lower in stdlib_modules:
+                continue
+            
+            # Check if there's a package mapping
+            if imp_lower in package_mappings:
+                packages_to_install.append(package_mappings[imp_lower])
+            else:
+                # Only add if it's not a known stdlib module
+                # This is a safe fallback for third-party packages
                 packages_to_install.append(imp)
         
         # Remove duplicates
         packages_to_install = list(set(packages_to_install))
+        
+        if not packages_to_install:
+            logger.info("No external packages detected to install")
+            return True
+        
+        logger.info(f"Detected packages to install: {packages_to_install}")
         
         # Get appropriate pip install command
         pip_args = get_pip_install_args(python_cmd)
@@ -617,7 +666,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 def run_django_migrations_direct(project_folder, django_info, python_cmd):
     """
-    Run Django migrations directly with better error handling and no timeout
+    Run Django migrations directly
     """
     try:
         logger.info("Running Django migrations")
@@ -633,63 +682,34 @@ def run_django_migrations_direct(project_folder, django_info, python_cmd):
         try:
             os.chdir(project_root)
             
-            # Run makemigrations first (no timeout, but with reasonable wait)
-            try:
-                makemigrations_result = subprocess.run([
-                    python_cmd, 'manage.py', 'makemigrations', '--verbosity=0'
-                ], capture_output=True, text=True, timeout=30)
-                
-                if makemigrations_result.returncode != 0:
-                    logger.warning(f"Makemigrations issues: {makemigrations_result.stderr}")
-            except subprocess.TimeoutExpired:
-                logger.warning("Makemigrations timed out, continuing...")
+            # Run makemigrations first
+            makemigrations_result = subprocess.run([
+                python_cmd, 'manage.py', 'makemigrations'
+            ], capture_output=True, text=True, timeout=60)
             
-            # Run migrations without timeout to prevent hanging
-            try:
-                migrate_result = subprocess.run([
-                    python_cmd, 'manage.py', 'migrate', '--verbosity=0', '--run-syncdb'
-                ], capture_output=True, text=True, timeout=60)  # Reduced timeout
-                
-                if migrate_result.returncode == 0:
-                    logger.info("Migrations completed successfully")
-                else:
-                    logger.warning(f"Migration had issues: {migrate_result.stderr}")
-                    # Try a simpler migration approach
-                    try:
-                        simple_migrate = subprocess.run([
-                            python_cmd, 'manage.py', 'migrate', '--fake-initial'
-                        ], capture_output=True, text=True, timeout=30)
-                        
-                        if simple_migrate.returncode == 0:
-                            logger.info("Simple migration successful")
-                        else:
-                            logger.warning("Simple migration also failed, continuing without migrations")
-                    except subprocess.TimeoutExpired:
-                        logger.warning("Simple migration timed out, continuing...")
-                        
-            except subprocess.TimeoutExpired:
-                logger.warning("Migration timed out, attempting to kill process and continue...")
-                # Kill any hanging migration processes
-                try:
-                    if IS_WINDOWS:
-                        subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], capture_output=True)
-                    else:
-                        subprocess.run(['pkill', '-f', 'manage.py migrate'], capture_output=True)
-                except:
-                    pass
+            if makemigrations_result.returncode != 0:
+                logger.warning(f"Makemigrations issues: {makemigrations_result.stderr}")
             
-            # Collect static files with shorter timeout
+            # Run migrations
+            migrate_result = subprocess.run([
+                python_cmd, 'manage.py', 'migrate'
+            ], capture_output=True, text=True, timeout=120)
+            
+            if migrate_result.returncode == 0:
+                logger.info("Migrations completed successfully")
+            else:
+                logger.warning(f"Migration had issues: {migrate_result.stderr}")
+            
+            # Collect static files
             try:
                 collectstatic_result = subprocess.run([
-                    python_cmd, 'manage.py', 'collectstatic', '--noinput', '--verbosity=0'
-                ], capture_output=True, text=True, timeout=30)
+                    python_cmd, 'manage.py', 'collectstatic', '--noinput'
+                ], capture_output=True, text=True, timeout=60)
                 
                 if collectstatic_result.returncode == 0:
                     logger.info("Static files collected successfully")
                 else:
-                    logger.warning("Static files collection had issues, continuing...")
-            except subprocess.TimeoutExpired:
-                logger.warning("Static files collection timed out, continuing...")
+                    logger.warning("Static files collection had issues")
             except Exception as e:
                 logger.warning(f"Error collecting static files: {str(e)}")
             
@@ -701,7 +721,7 @@ def run_django_migrations_direct(project_folder, django_info, python_cmd):
     except Exception as e:
         logger.warning(f"Migration error: {str(e)}")
         return False
-    
+
 def start_django_server_direct(username, project_name, project_folder, django_info, port, python_cmd):
     """
     Start Django server directly

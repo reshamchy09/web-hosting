@@ -1,0 +1,6 @@
+Not Found: /
+[04/Nov/2025 12:00:04] "GET / HTTP/1.1" 404 2474
+Not Found: /favicon.ico
+[04/Nov/2025 12:00:04] "GET /favicon.ico HTTP/1.1" 404 2525
+Not Found: /
+[04/Nov/2025 12:07:56] "GET / HTTP/1.1" 404 2474
